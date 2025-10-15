@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Hammer / Nipper 분류기</title>
+    <script>
+        function uploadImage() {
+            let formData = new FormData();
+            let imageFile = document.getElementById("imageInput").files[0];
+            formData.append("image", imageFile);
+
+            fetch("http://127.0.0.1:5000/classify", {
+                method: "POST",
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("result").innerHTML =
+                    `<h3>결과: ${data.class} (${data.confidence}%)</h3>`;
+            })
+            .catch(error => console.error("Error:", error));
+        }
+    </script>
+</head>
+<body>
+    <h1>Hammer / Nipper 분류기</h1>
+    <input type="file" id="imageInput">
+    <button onclick="uploadImage()">업로드 및 분석</button>
+    <div id="result"></div>
+</body>
+</html>
