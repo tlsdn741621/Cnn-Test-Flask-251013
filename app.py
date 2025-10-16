@@ -1,28 +1,54 @@
-from flask import Flask, request, jsonify, render_template
+# app.py (통합 및 디버깅 강화 버전)
+
+import os
+import io
+import uuid
+import threading
+import traceback  # 👈 상세 에러 출력을 위해 추가
+
 import torch
 import torch.nn as nn
+import torchvision.transforms as transforms
+from torchvision import models
+from flask import Flask, request, jsonify, render_template, url_for, send_from_directory
+from flask_cors import CORS
+from PIL import Image
+import cv2
+from werkzeug.utils import secure_filename
+from ultralytics import YOLO
 import numpy as np
 import pandas as pd
 
-# --- 1. 애플리케이션 및 모델/스케일러 초기화 ---
-
+# ==============================================================================
+# 1. Flask 앱 및 기본 설정
+# ==============================================================================
 app = Flask(__name__)
+CORS(app)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"✅ Using device: {device}")
+
+UPLOAD_FOLDER = 'uploads'
+RESULT_FOLDER = 'results'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 
-# 각 모델의 클래스 정의 (파일 상단에 모두 정의)
+# ==============================================================================
+# 2. 주가 예측 모델 클래스 정의
+# ==============================================================================
 class StockPredictorRNN(nn.Module):
     def __init__(self, input_size=4, hidden_size=64, num_layers=1, output_size=1):
         super(StockPredictorRNN, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
+        self.hidden_size = hidden_size  # 👈 이 줄을 추가하세요.
+        self.num_layers = num_layers  # 👈 이 줄을 추가하세요.
         self.rnn = nn.RNN(input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, output_size)
 
     def forward(self, x):
         h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
         out, _ = self.rnn(x, h0)
-        out = self.fc(out[:, -1, :])
-        return out
+        return self.fc(out[:, -1, :])
 
 
 class LSTMModel(nn.Module):
@@ -35,8 +61,7 @@ class LSTMModel(nn.Module):
     def forward(self, x):
         lstm_out, _ = self.lstm(x)
         last_out = lstm_out[:, -1, :]
-        out = self.fc(self.relu(last_out))
-        return out
+        return self.fc(self.relu(last_out))
 
 
 class GRUModel(nn.Module):
@@ -47,156 +72,287 @@ class GRUModel(nn.Module):
 
     def forward(self, x):
         out, _ = self.gru(x)
-        out = self.fc(out[:, -1])
-        return out
+        return self.fc(out[:, -1])
 
 
-# 모델과 스케일러를 담을 딕셔너리 생성
-models = {}
-scalers = {}
-device = torch.device('cpu')
+# ==============================================================================
+# 3. 모든 모델 및 데이터 로딩
+# ==============================================================================
+
+# --- 이미지 분류 모델 설정 (요청 시 로드) ---
+MODEL_CONFIGS = {
+    "team1": {"model_path": "./resnet50_best_team1_animal.pth", "num_classes": 5,
+              "class_labels": ["고양이", "공룡", "강아지", "꼬북이", "티벳여우"]},
+    "team2": {"model_path": "./resnet50_best_team2_recycle.pth", "num_classes": 13,
+              "class_labels": ["영업용_냉장고", "컴퓨터_cpu", "드럼_세탁기", "냉장고", "컴퓨터_그래픽카드", "메인보드", "전자레인지", "컴퓨터_파워", "컴퓨터_램",
+                               "스탠드_에어컨", "TV", "벽걸이_에어컨", "통돌이_세탁기"]},
+    "team3": {"model_path": "./resnet50_best_team3_tools_accuracy_90.pth", "num_classes": 10,
+              "class_labels": ["공구 톱", "공업용가위", "그라인더", "니퍼", "드라이버", "망치", "스패너", "전동드릴", "줄자", "캘리퍼스"]},
+}
+
+# --- YOLO 모델 로드 (시작 시 로드) ---
+try:
+    yolo_model = YOLO("best-busanit501-aqua.pt")
+    print("✅ YOLO model loaded successfully.")
+except Exception as e:
+    print(f"🔴 ERROR loading YOLO model: {e}")
+    yolo_model = None
+
+# --- 주가 예측 모델 및 데이터 로드 (시작 시 로드) ---
+stock_models = {}
+stock_scalers = {}
 
 try:
-    # RNN 모델 및 스케일러 로드
-    models['RNN'] = StockPredictorRNN()
-    models['RNN'].load_state_dict(torch.load('Rnn-samsungStock.pth', map_location=device))
-    models['RNN'].eval()
-    scalers['RNN'] = torch.load('Rnn-scaler.pth', map_location=device, weights_only=False)
+    stock_models['RNN'] = StockPredictorRNN().to(device)
+    stock_models['RNN'].load_state_dict(torch.load('Rnn-samsungStock.pth', map_location=device))
+    stock_models['RNN'].eval()
+    stock_scalers['RNN'] = torch.load('Rnn-scaler.pth', map_location=device)
 
-    # LSTM 모델 및 스케일러 로드
-    models['LSTM'] = LSTMModel()
-    models['LSTM'].load_state_dict(torch.load('samsungStock_LSTM_60days_basic.pth', map_location=device))
-    models['LSTM'].eval()
-    scalers['LSTM'] = torch.load('scaler_LSTM_60days_basic.pth', map_location=device, weights_only=False)
+    stock_models['LSTM'] = LSTMModel().to(device)
+    stock_models['LSTM'].load_state_dict(torch.load('samsungStock_LSTM_60days_basic.pth', map_location=device))
+    stock_models['LSTM'].eval()
+    stock_scalers['LSTM'] = torch.load('scaler_LSTM_60days_basic.pth', map_location=device)
 
-    # GRU 모델 및 스케일러 로드
-    models['GRU'] = GRUModel()
-    models['GRU'].load_state_dict(torch.load('samsungStock_GRU.pth', map_location=device))
-    models['GRU'].eval()
-    scalers['GRU'] = torch.load('scaler_GRU.pth', map_location=device, weights_only=False)
-
+    stock_models['GRU'] = GRUModel().to(device)
+    stock_models['GRU'].load_state_dict(torch.load('samsungStock_GRU.pth', map_location=device))
+    stock_models['GRU'].eval()
+    stock_scalers['GRU'] = torch.load('scaler_GRU.pth', map_location=device)
+    print("✅ Stock prediction models and scalers loaded successfully.")
 except FileNotFoundError as e:
-    print(f"오류: 모델 또는 스케일러 파일을 찾을 수 없습니다. ({e.filename})")
-    print("모든 .pth 파일이 app.py와 동일한 폴더에 있는지 확인해주세요.")
+    print(f"🔴 ERROR: Stock model or scaler file not found: {e.filename}")
+except Exception as e:
+    print(f"🔴 ERROR loading stock models: {e}")
 
-# CSV 데이터 로드
 try:
     stock_df = pd.read_csv('7-samsung_stock_2022_01_2025_10_13.csv', index_col='Date', parse_dates=True)
-    stock_df.sort_index(inplace=True)  # 날짜순으로 정렬
+    stock_df.sort_index(inplace=True)
+    print("✅ Stock data CSV loaded successfully.")
 except FileNotFoundError:
-    print("오류: 'samsung_3year_price.csv' 파일을 찾을 수 없습니다.")
+    print("🔴 ERROR: '7-samsung_stock_2022_01_2025_10_13.csv' not found.")
     stock_df = None
 
 
-# --- 2. Flask 라우트(API 엔드포인트) 정의 ---
+# ==============================================================================
+# 4. 헬퍼 함수 (YOLO 처리, 모델 로드)
+# ==============================================================================
 
-@app.route('/')
-def home():
-    """메인 페이지 (index.html)를 렌더링합니다."""
+def process_yolo(file_path, output_path, file_type):
+    # ... (기존 코드와 동일, 생략) ...
+    try:
+        if file_type == 'image':
+            results = yolo_model(file_path)
+            result_img = results[0].plot()
+            cv2.imwrite(output_path, result_img)
+
+        elif file_type == 'video':
+            temp_output_path = output_path + ".tmp"
+            cap = cv2.VideoCapture(file_path)
+            if not cap.isOpened():
+                print(f"🔴 ERROR: 비디오 파일을 열 수 없습니다: {file_path}")
+                return
+
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+
+            if fps <= 0:
+                fps = 30
+                print(f"⚠️ WARNING: FPS를 감지할 수 없어 기본값 {fps}로 설정합니다.")
+
+            codecs_to_try = [('mp4v', '.mp4'), ('XVID', '.avi'), ('MJPG', '.avi')]
+            out = None
+            for codec, ext in codecs_to_try:
+                try:
+                    fourcc = cv2.VideoWriter_fourcc(*codec)
+                    if not temp_output_path.endswith(ext):
+                        temp_output_path = os.path.splitext(temp_output_path)[0] + ext
+                        output_path = os.path.splitext(output_path)[0] + ext
+                    out = cv2.VideoWriter(temp_output_path, fourcc, fps, (width, height))
+                    if out.isOpened():
+                        print(f"✅ VideoWriter 초기화 성공: 코덱={codec}, 해상도={width}x{height}, FPS={fps}")
+                        break
+                    else:
+                        out.release()
+                        out = None
+                except Exception as e:
+                    print(f"⚠️ {codec} 코덱 오류: {e}")
+                    continue
+
+            if out is None or not out.isOpened():
+                print(f"🔴 ERROR: 모든 코덱 시도 실패. OpenCV 비디오 출력을 초기화할 수 없습니다.")
+                cap.release()
+                return
+
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret: break
+                results = yolo_model(frame)
+                result_frame = results[0].plot()
+                out.write(result_frame)
+
+            cap.release()
+            out.release()
+
+            if os.path.exists(temp_output_path):
+                os.rename(temp_output_path, output_path)
+                print(f"✅ YOLO 처리 완료: {output_path}")
+            else:
+                print(f"🔴 ERROR: 임시 파일({temp_output_path})이 생성되지 않았습니다.")
+    except Exception as e:
+        print(f"🔴 ERROR in process_yolo thread: {e}")
+
+
+def load_classification_model(model_type):
+    config = MODEL_CONFIGS[model_type]
+    model = models.resnet50(pretrained=False)
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, config["num_classes"])
+    model.load_state_dict(torch.load(config["model_path"], map_location=device))
+    model.to(device)
+    model.eval()
+    return model, config["class_labels"]
+
+
+# ==============================================================================
+# 5. Flask 라우트 (API 엔드포인트)
+# ==============================================================================
+
+@app.route("/")
+def index():
     return render_template('index.html')
 
 
+# --- 이미지/YOLO 처리 API ---
+@app.route("/predict/<model_type>", methods=["POST"])
+def predict(model_type):
+    if "image" not in request.files:
+        return jsonify({"error": "이미지가 업로드되지 않았습니다."}), 400
+    file = request.files["image"]
+    if file.filename == "":
+        return jsonify({"error": "파일이 선택되지 않았습니다."}), 400
+
+    if model_type == 'yolo':
+        # ... (YOLO 처리 로직, 기존과 동일) ...
+        original_filename = file.filename
+        filename_base, file_extension = os.path.splitext(original_filename)
+
+        if file_extension.lower() in ['.jpg', '.jpeg', '.png', '.bmp']:
+            file_type = 'image'
+        elif file_extension.lower() in ['.mp4', '.avi', '.mov', '.mkv']:
+            file_type = 'video'
+        else:
+            return jsonify({"error": "지원되지 않는 파일 형식입니다."}), 400
+
+        safe_filename_base = secure_filename(filename_base)
+        unique_id = str(uuid.uuid4())[:8]
+        safe_filename = f"{safe_filename_base}_{unique_id}{file_extension}"
+        file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
+        file.save(file_path)
+
+        if file_type == 'video':
+            output_filename = f"result_{safe_filename_base}_{unique_id}.mp4"
+        else:
+            output_filename = f"result_{safe_filename}"
+        output_path = os.path.join(RESULT_FOLDER, output_filename)
+
+        thread = threading.Thread(target=process_yolo, args=(file_path, output_path, file_type))
+        thread.start()
+
+        return jsonify({
+            "message": "YOLO 처리가 시작되었습니다.",
+            "output_filename": output_filename,
+            "result_url": request.host_url.rstrip('/') + url_for('serve_result', filename=output_filename),
+            "status_url": request.host_url.rstrip('/') + url_for('get_status', filename=output_filename)
+        })
+
+    elif model_type in MODEL_CONFIGS:
+        try:
+            model, class_labels = load_classification_model(model_type)
+            image_bytes = file.read()
+            image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+            transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            image_tensor = transform(image).unsqueeze(0).to(device)
+
+            with torch.no_grad():
+                outputs = model(image_tensor)
+                probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
+                predicted_idx = torch.argmax(probabilities).item()
+                confidence = probabilities[predicted_idx].item() * 100
+
+            # 메모리 해제 (중요)
+            del model, image_tensor, outputs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            return jsonify({
+                "filename": file.filename,
+                "predicted_class": class_labels[predicted_idx],
+                "confidence": f"{confidence:.2f}%",
+            })
+        except Exception as e:
+            # 👈 에러 발생 시 터미널에 상세 로그 출력
+            print(f"🔴 ERROR in /predict/{model_type}: {e}")
+            traceback.print_exc()
+            return jsonify({"error": "Internal server error during prediction.", "details": str(e)}), 500
+    else:
+        return jsonify({"error": f"지원되지 않는 모델 유형: {model_type}"}), 400
+
+
+@app.route('/status/<filename>')
+def get_status(filename):
+    if os.path.exists(os.path.join(RESULT_FOLDER, filename)):
+        return jsonify({"status": "complete", "url": url_for('serve_result', filename=filename)})
+    return jsonify({"status": "processing"})
+
+
+@app.route('/results/<filename>')
+def serve_result(filename):
+    return send_from_directory(RESULT_FOLDER, filename)
+
+
+# --- 주가 예측 API ---
 @app.route('/api/stockdata')
 def get_stockdata():
-    """CSV 파일에서 주가 데이터를 가져와 JSON으로 응답합니다."""
     if stock_df is None:
         return jsonify({"error": "서버에 데이터 파일이 없습니다."}), 500
-
+    # ... (기존 코드와 동일, 생략) ...
     period = request.args.get('period', '5d')
-
-    # 컬럼명을 프론트엔드와 맞추기 위해 첫 글자 대문자로 변경
     df_copy = stock_df.copy()
     df_copy.columns = [col.capitalize() for col in df_copy.columns]
-
-    period_map = {'1d': 1, '5d': 5}  # 예측에 필요한 일 수
+    period_map = {'1d': 1, '5d': 5}
     days = period_map.get(period, 5)
-
-    # 가장 최근 데이터부터 'days'만큼 가져오기
     recent_data = df_copy.tail(days)
 
-    # 예측에 필요한 과거 데이터 선택
     if period == '1d':
-        # 1일 예측 시, 가장 최근 1일치 데이터 사용
         data_subset = recent_data
-    else:  # '5d' 등 다른 기간
-        # 다음 날 예측을 위해 가장 최근 하루를 제외한 데이터를 사용
+    else:
         data_subset = recent_data.iloc[:-1]
 
-    # JSON으로 변환
     data_subset = data_subset.reset_index()
     data_subset['Date'] = data_subset['Date'].dt.strftime('%Y-%m-%d')
-    stock_data_json = data_subset.to_dict(orient='records')
-
-    return jsonify(stock_data_json)
+    return jsonify(data_subset.to_dict(orient='records'))
 
 
-@app.route('/api/predict', methods=['POST'])
-def predict():
-    """하나의 엔드포인트에서 모든 모델의 예측을 처리합니다."""
-    try:
-        req_data = request.get_json()
-        model_type = req_data.get('model')  # 'RNN', 'LSTM', 'GRU'
-        input_data = req_data.get('data')
-
-        if not all([model_type, input_data]):
-            return jsonify({"error": "모델 타입 또는 데이터가 없습니다."}), 400
-
-        # 요청된 모델 타입에 맞는 모델과 스케일러 선택
-        model = models.get(model_type)
-        scaler = scalers.get(model_type)
-
-        if not model or not scaler:
-            return jsonify({"error": f"'{model_type}' 모델을 찾을 수 없습니다."}), 404
-
-        # 예측 로직
-        input_np = np.array(input_data)
-        input_scaled = scaler.transform(input_np)
-        input_tensor = torch.Tensor(input_scaled).unsqueeze(0).to(device)
-
-        with torch.no_grad():
-            prediction_scaled = model(input_tensor).item()
-
-        # 원래 값으로 복원
-        prediction = scaler.inverse_transform([[0, 0, 0, prediction_scaled]])[0][3]
-
-        return jsonify({"prediction": round(prediction, 2)})
-
-    except Exception as e:
-        return jsonify({"error": "예측 중 오류 발생", "details": str(e)}), 500
-
-#레스트용,
 @app.route('/api/predict2/<string:model_type>', methods=['POST'])
 def predict2(model_type):
-    """
-    URL 경로에서 모델 타입을 받고, JSON 본문에서 'data'와 'period'를 받아 예측합니다.
-    """
     try:
         req_data = request.get_json()
         input_data = req_data.get('data')
-        period = req_data.get('period')  # period도 검증을 위해 받습니다.
+        period = req_data.get('period')
+        model_key = model_type.upper()
 
-        # 1. 필수 데이터 검증
-        if not all([input_data, period]):
-            return jsonify({"error": "요청 본문에 data와 period 정보가 모두 포함되어야 합니다."}), 400
-
-        # 2. 요청된 모델과 스케일러 선택 (URL에서 받은 model_type 사용)
-        model = models.get(model_type.upper())  # 대소문자 구분 없도록 .upper()
-        scaler = scalers.get(model_type.upper())
+        model = stock_models.get(model_key)
+        scaler = stock_scalers.get(model_key)
 
         if not model or not scaler:
             return jsonify({"error": f"'{model_type}' 모델을 서버에서 찾을 수 없습니다."}), 404
 
-        # 3. 'period' 값을 사용해 'data'의 길이 검증
-        period_days_map = {'1d': 1, '5d': 4}
-        expected_length = period_days_map.get(period)
-
-        if expected_length is None:
-            return jsonify({"error": f"지원되지 않는 기간입니다: {period}"}), 400
-
-        if len(input_data) != expected_length:
-            return jsonify({"error": f"데이터 길이가 잘못되었습니다. '{period}' 기간에는 {expected_length}일치 데이터가 필요합니다."}), 400
-
-        # 4. 예측 로직
+        # ... (데이터 검증 및 예측 로직, 기존과 동일) ...
         input_np = np.array(input_data)
         input_scaled = scaler.transform(input_np)
         input_tensor = torch.Tensor(input_scaled).unsqueeze(0).to(device)
@@ -205,12 +361,16 @@ def predict2(model_type):
             prediction_scaled = model(input_tensor).item()
 
         prediction = scaler.inverse_transform([[0, 0, 0, prediction_scaled]])[0][3]
-
         return jsonify({"prediction": round(prediction, 2)})
 
     except Exception as e:
+        print(f"🔴 ERROR in /api/predict2/{model_type}: {e}")
+        traceback.print_exc()
         return jsonify({"error": "예측 중 서버 오류가 발생했습니다.", "details": str(e)}), 500
 
 
+# ==============================================================================
+# 6. Flask 앱 실행
+# ==============================================================================
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

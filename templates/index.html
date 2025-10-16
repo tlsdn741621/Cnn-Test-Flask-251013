@@ -1,29 +1,28 @@
 <!DOCTYPE html>
 <html lang="ko">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>삼성 주가 예측 (Flask + Vanilla JS)</title>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Model Playground</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
-      body {
+      /* 주식 예측 섹션 스타일 */
+      .stock-body {
         font-family: sans-serif;
         padding: 20px;
         max-width: 900px;
         margin: auto;
       }
-      button {
-        padding: 8px 12px;
-        margin: 5px;
-        cursor: pointer;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-      }
-      button:disabled {
+      .stock-body button:disabled {
         cursor: not-allowed;
         background-color: #eee;
       }
-      form {
+      .stock-body form {
         margin: 20px 0;
       }
       .data-item {
@@ -32,244 +31,345 @@
         margin-top: 10px;
         border-radius: 4px;
       }
-      h2,
-      h3 {
+      .stock-body h2,
+      .stock-body h3 {
         margin-top: 30px;
       }
     </style>
-  </head>
-  <body>
-    <h3>📈 삼성 주가 예측</h3>
-    <p>AI를 활용한 삼성 주가 예측 모델을 테스트할 수 있습니다.</p>
+</head>
+<body>
+    <h1>🤖 AI Model Playground</h1>
+    <p>아래에서 원하는 AI 기능을 선택하여 테스트해 보세요.</p>
 
-    <form id="period-form">
-      <label style="margin-right: 10px">
-        <input type="radio" name="period" value="1d" /> 1일
-      </label>
-      <label style="margin-right: 10px">
-        <input type="radio" name="period" value="5d" /> 5일 (4일)
-      </label>
-      </form>
+    <section id="image-prediction-section">
+        <h2>📷 이미지 & 영상 AI Hub</h2>
+        <p>파일을 업로드하고, 원하는 AI 모델을 선택하여 예측을 실행하세요.</p>
 
-    <button id="fetch-data-btn">데이터 가져오기</button>
+        <div class="upload-section">
+            <h3>1. 파일 선택</h3>
+            <input type="file" id="fileInput" required>
+        </div>
 
-    <div id="data-display"><p>데이터가 없습니다.</p></div>
+        <div class="upload-section">
+            <h3>2. 모델 선택 및 예측 실행</h3>
+            <button onclick="runPrediction('team1')">동물 분류</button>
+            <button onclick="runPrediction('team2')">재활용품 분류</button>
+            <button onclick="runPrediction('team3')">공구 분류</button>
+            <button onclick="runPrediction('yolo')">YOLO 객체 탐지</button>
+        </div>
 
-    <div id="predict-buttons">
-      <button data-model="RNN">RNN 예측하기</button>
-      <button data-model="LSTM">LSTM 예측하기</button>
-      <button data-model="GRU">GRU 예측하기</button>
-    </div>
+        <div id="loading" style="display: none;">
+            <p>처리 중입니다... 잠시만 기다려 주세요.</p>
+            <div class="loader"></div>
+        </div>
 
-    <h2>📊 예측 결과</h2>
-    <div id="prediction-results">
-      <h3>RNN: 예측 대기 중</h3>
-      <h3>LSTM: 예측 대기 중</h3>
-      <h3>GRU: 예측 대기 중</h3>
-    </div>
+        <div class="result-container">
+            <h3>결과</h3>
+            <div id="result">결과가 여기에 표시됩니다.</div>
+            <div class="preview-container">
+                <img id="preview-image" src="" style="display: none; max-width: 100%; height: auto;">
+                <video id="preview-video" src="" style="display: none; max-width: 100%; height: auto;" controls></video>
+            </div>
+        </div>
+    </section>
 
-    <h2>📉 주가 데이터 그래프</h2>
-    <div>
-      <canvas id="stock-chart" width="100%" height="400"></canvas>
-    </div>
+    <hr style="margin: 40px 0;">
+
+    <section id="stock-prediction-section" class="stock-body">
+        <h2>📈 삼성 주가 예측</h2>
+        <p>AI를 활용한 삼성 주가 예측 모델을 테스트할 수 있습니다.</p>
+
+        <form id="period-form">
+          <label style="margin-right: 10px">
+            <input type="radio" name="period" value="1d" /> 1일
+          </label>
+          <label style="margin-right: 10px">
+            <input type="radio" name="period" value="5d" checked /> 5일 (4일치 데이터 사용)
+          </label>
+        </form>
+
+        <button id="fetch-data-btn">데이터 가져오기</button>
+
+        <div id="data-display"><p>데이터가 없습니다.</p></div>
+
+        <div id="predict-buttons">
+          <button data-model="RNN">RNN 예측하기</button>
+          <button data-model="LSTM">LSTM 예측하기</button>
+          <button data-model="GRU">GRU 예측하기</button>
+        </div>
+
+        <h2>📊 예측 결과</h2>
+        <div id="prediction-results">
+          <h3>RNN: 예측 대기 중</h3>
+          <h3>LSTM: 예측 대기 중</h3>
+          <h3>GRU: 예측 대기 중</h3>
+        </div>
+
+        <h2>📉 주가 데이터 그래프</h2>
+        <div>
+          <canvas id="stock-chart" width="100%" height="400"></canvas>
+        </div>
+    </section>
 
     <script>
-      // 2. React의 state 역할을 할 전역 변수들
-      let stockData = [];
-      let predictions = {};
-      let loading = false;
-      let selectedPeriod = '';
-      let chartInstance = null; // Chart.js 인스턴스를 저장할 변수
-
-      // 3. DOM 요소 참조
-      const periodForm = document.getElementById('period-form');
-      const fetchDataBtn = document.getElementById('fetch-data-btn');
-      const dataDisplay = document.getElementById('data-display');
-      const predictButtonsContainer = document.getElementById('predict-buttons');
-      const predictionResults = document.getElementById('prediction-results');
-      const chartCanvas = document.getElementById('stock-chart').getContext('2d');
-
-      // 4. 로딩 상태 관리 함수
-      const setLoading = (isLoading) => {
-        loading = isLoading;
-        fetchDataBtn.disabled = loading;
-        fetchDataBtn.textContent = loading ? '로딩 중...' : '데이터 가져오기';
-        document
-          .querySelectorAll('#predict-buttons button')
-          .forEach((btn) => (btn.disabled = loading));
-      };
-
-      // 5. 주말 제외 다음 영업일 계산 함수 (React 코드와 동일)
-      const getNextBusinessDay = (dateStr) => {
-        let date = new Date(dateStr);
-        do {
-          date.setDate(date.getDate() + 1);
-        } while (date.getDay() === 0 || date.getDay() === 6);
-        return date.toISOString().split('T')[0];
-      };
-
-      // 6. 이벤트 리스너 설정
-      periodForm.addEventListener('change', (event) => {
-        selectedPeriod = event.target.value;
-      });
-
-      fetchDataBtn.addEventListener('click', async () => {
-        if (!selectedPeriod) {
-          alert('기간을 선택하세요.');
-          return;
-        }
-        setLoading(true);
-        try {
-          // ❗️ Flask API 엔드포인트 예시: /api/stockdata?period=5d
-          const response = await fetch(`/api/stockdata?period=${selectedPeriod}`);
-          if (!response.ok) throw new Error('데이터를 가져오는 데 실패했습니다.');
-
-          const data = await response.json();
-          stockData = data; // 전역 변수에 데이터 저장
-          predictions = {}; // 예측 결과 초기화
-          renderStockData();
-          renderPredictionResults();
-          updateChart();
-        } catch (error) {
-          console.error(error);
-          alert(error.message);
-        }
-        setLoading(false);
-      });
-
-      predictButtonsContainer.addEventListener('click', async (event) => {
-        if (event.target.tagName !== 'BUTTON') return;
-        const modelType = event.target.dataset.model;
-
-        if (!selectedPeriod || stockData.length === 0) {
-          alert('기간을 선택하고 데이터를 가져온 후 예측하세요.');
-          return;
-        }
-
-        const periodDaysMap = { '1d': 1, '5d': 4 };
-        const days = periodDaysMap[selectedPeriod] || 1;
-
-        const inputData = stockData
-          .slice(0, days)
-          .map((item) => [
-            parseFloat(item.Open) || 0,
-            parseFloat(item.Low) || 0,
-            parseFloat(item.High) || 0,
-            parseFloat(item.Close) || 0,
-          ]);
-
-        setLoading(true);
-        try {
-          // ❗️ Flask API 엔드포인트 예시: /api/predict (POST)
-          const response = await fetch('/api/predict', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: modelType,
-              data: inputData,
-              period: selectedPeriod,
-            }),
-          });
-          if (!response.ok) throw new Error('예측에 실패했습니다.');
-
-          const result = await response.json();
-          predictions[modelType] = result.prediction; // 예측 결과 저장
-          renderPredictionResults();
-          updateChart();
-        } catch (error) {
-          console.error(error);
-          alert(error.message);
-        }
-        setLoading(false);
-      });
-
-      // 7. 화면 렌더링 함수들 (React의 렌더링 로직 대체)
-      const renderStockData = () => {
-        if (stockData.length === 0) {
-          dataDisplay.innerHTML = '<p>데이터가 없습니다.</p>';
-          return;
-        }
-        dataDisplay.innerHTML = stockData
-          .map(
-            (item, index) => `
-            <div class="data-item">
-              <h4>${index + 1}번째 날 (${item.Date})</h4>
-              <p>시작가: ${item.Open}</p>
-              <p>최소가: ${item.Low}</p>
-              <p>최대가: ${item.High}</p>
-              <p>종가: ${item.Close}</p>
-            </div>
-          `,
-          )
-          .join('');
-      };
-
-      const renderPredictionResults = () => {
-        predictionResults.innerHTML = ['RNN', 'LSTM', 'GRU'].map(model =>
-            `<h3>${model}: ${predictions[model] || '예측 대기 중'}</h3>`
-        ).join('');
-      };
-
-      // 8. Chart.js를 사용한 그래프 업데이트 함수
-      const updateChart = () => {
-        if (chartInstance) {
-          chartInstance.destroy(); // 기존 차트가 있으면 제거
-        }
-
-        if (stockData.length === 0) return;
-
-        const lastDate = stockData[stockData.length - 1].Date;
-        const nextBusinessDay = getNextBusinessDay(lastDate);
-
-        const labels = stockData.map(d => d.Date);
-        if (Object.keys(predictions).length > 0) {
-            labels.push(nextBusinessDay); // 예측이 있으면 다음 날짜 추가
-        }
-
-        const closeData = stockData.map(d => parseFloat(d.Close));
-
-        // 예측 데이터를 차트 데이터 형식에 맞게 가공
-        const createPredictionDataset = (model, color) => {
-            const data = new Array(stockData.length).fill(null);
-            if (predictions[model]) {
-                data.push(parseFloat(predictions[model]));
+        // ==========================================================
+        // JavaScript for Image & Video AI Hub
+        // ==========================================================
+        function runPrediction(modelType) {
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length === 0) {
+                alert("먼저 이미지/영상 파일을 선택하세요.");
+                return;
             }
-            return {
-                label: `${model} 예측`,
-                data: data,
-                borderColor: color,
-                tension: 0.1,
-                pointRadius: 5,
-                pointBackgroundColor: color,
+            const file = fileInput.files[0];
+            displayPreview(file);
+
+            const formData = new FormData();
+            formData.append("image", file);
+
+            $.ajax({
+                url: `/predict/${modelType}`,
+                type: "POST",
+                data: formData,
+                contentType: false,
+                processData: false,
+                beforeSend: function() {
+                    $('#loading').show();
+                    $('#result').html('');
+                },
+                success: function(response) {
+                    if (modelType === "yolo") {
+                        $('#loading p').text('YOLO 모델이 영상을 처리 중입니다...');
+                        pollForResult(response.status_url); // Pass the full status URL
+                    } else {
+                        $('#loading').hide();
+                        $('#result').html(`
+                            <p><strong>파일명:</strong> ${response.filename}</p>
+                            <p><strong>예측 결과:</strong> ${response.predicted_class}</p>
+                            <p><strong>정확도:</strong> ${response.confidence}</p>
+                        `);
+                    }
+                },
+                error: function(jqXHR) {
+                    $('#loading').hide();
+                    const errorMsg = jqXHR.responseJSON ? jqXHR.responseJSON.error : "알 수 없는 오류 발생";
+                    $('#result').html(`<p style='color:red;'>예측 실패: ${errorMsg}</p>`);
+                }
+            });
+        }
+
+        function pollForResult(statusUrl) {
+            const interval = setInterval(() => {
+                $.get(statusUrl)
+                    .done(function(response) {
+                        if (response.status === 'complete') {
+                            clearInterval(interval);
+                            $('#loading').hide();
+                            const resultUrl = new URL(statusUrl);
+                            resultUrl.pathname = response.url; // Use relative path from status response
+
+                            const isVideo = resultUrl.pathname.toLowerCase().endsWith('.mp4');
+                            $('#result').html(`
+                                <p><strong>처리 완료!</strong></p>
+                                <a href="${resultUrl.href}" download>결과 다운로드</a>
+                            `);
+                            if (isVideo) {
+                                $('#preview-video').attr('src', resultUrl.href).show();
+                                $('#preview-image').hide();
+                            } else {
+                                $('#preview-image').attr('src', resultUrl.href).show();
+                                $('#preview-video').hide();
+                            }
+                        }
+                    })
+                    .fail(function() {
+                        clearInterval(interval);
+                        $('#loading').hide();
+                        $('#result').html("<p style='color:red;'>결과 확인 중 오류 발생</p>");
+                    });
+            }, 2000);
+        }
+
+        function displayPreview(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const isVideo = file.type.startsWith('video/');
+                if (isVideo) {
+                    $('#preview-video').attr('src', e.target.result).show();
+                    $('#preview-image').hide();
+                } else {
+                    $('#preview-image').attr('src', e.target.result).show();
+                    $('#preview-video').hide();
+                }
             };
+            reader.readAsDataURL(file);
+        }
+
+        // ==========================================================
+        // JavaScript for Stock Prediction
+        // ==========================================================
+
+        // State variables
+        let stockData = [];
+        let predictions = {};
+        let stockLoading = false;
+        let selectedPeriod = '5d'; // Default value
+        let chartInstance = null;
+
+        // DOM element references
+        const periodForm = document.getElementById('period-form');
+        const fetchDataBtn = document.getElementById('fetch-data-btn');
+        const dataDisplay = document.getElementById('data-display');
+        const predictButtonsContainer = document.getElementById('predict-buttons');
+        const predictionResults = document.getElementById('prediction-results');
+        const chartCanvas = document.getElementById('stock-chart').getContext('2d');
+
+        const setStockLoading = (isLoading) => {
+            stockLoading = isLoading;
+            fetchDataBtn.disabled = stockLoading;
+            fetchDataBtn.textContent = stockLoading ? '로딩 중...' : '데이터 가져오기';
+            document.querySelectorAll('#predict-buttons button').forEach((btn) => (btn.disabled = stockLoading));
         };
 
-        chartInstance = new Chart(chartCanvas, {
-          type: 'line',
-          data: {
-            labels: labels,
-            datasets: [
-              {
-                label: '실제 종가',
-                data: closeData,
-                borderColor: '#8884d8',
-                tension: 0.1,
-              },
-              createPredictionDataset('RNN', '#ff0000'),
-              createPredictionDataset('LSTM', '#00ff00'),
-              createPredictionDataset('GRU', '#0000ff'),
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-          },
-        });
-      };
+        const getNextBusinessDay = (dateStr) => {
+            let date = new Date(dateStr);
+            do {
+                date.setDate(date.getDate() + 1);
+            } while (date.getDay() === 0 || date.getDay() === 6);
+            return date.toISOString().split('T')[0];
+        };
 
-      // 초기 렌더링
-      updateChart();
+        periodForm.addEventListener('change', (event) => {
+            selectedPeriod = event.target.value;
+        });
+
+        fetchDataBtn.addEventListener('click', async () => {
+            if (!selectedPeriod) {
+                alert('기간을 선택하세요.');
+                return;
+            }
+            setStockLoading(true);
+            try {
+                const response = await fetch(`/api/stockdata?period=${selectedPeriod}`);
+                if (!response.ok) throw new Error('데이터를 가져오는 데 실패했습니다.');
+                const data = await response.json();
+                stockData = data;
+                predictions = {};
+                renderStockData();
+                renderPredictionResults();
+                updateChart();
+            } catch (error) {
+                console.error(error);
+                alert(error.message);
+            }
+            setStockLoading(false);
+        });
+
+        predictButtonsContainer.addEventListener('click', async (event) => {
+            if (event.target.tagName !== 'BUTTON') return;
+            const modelType = event.target.dataset.model;
+
+            if (!selectedPeriod || stockData.length === 0) {
+                alert('기간을 선택하고 데이터를 가져온 후 예측하세요.');
+                return;
+            }
+
+            const inputData = stockData.map((item) => [
+                parseFloat(item.Open) || 0,
+                parseFloat(item.High) || 0, // 순서 수정: 시고저종
+                parseFloat(item.Low) || 0,
+                parseFloat(item.Close) || 0,
+            ]);
+
+            setStockLoading(true);
+            try {
+                // Flask의 /api/predict2/ endpoint를 사용
+                const response = await fetch(`/api/predict2/${modelType}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        data: inputData,
+                        period: selectedPeriod,
+                    }),
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || '예측에 실패했습니다.');
+                }
+                const result = await response.json();
+                predictions[modelType] = result.prediction;
+                renderPredictionResults();
+                updateChart();
+            } catch (error) {
+                console.error(error);
+                alert(error.message);
+            }
+            setStockLoading(false);
+        });
+
+        const renderStockData = () => {
+            if (stockData.length === 0) {
+                dataDisplay.innerHTML = '<p>데이터가 없습니다.</p>';
+                return;
+            }
+            dataDisplay.innerHTML = stockData.map((item, index) => `
+                <div class="data-item">
+                    <h4>${index + 1}번째 날 (${item.Date})</h4>
+                    <p>시가: ${item.Open}, 고가: ${item.High}, 저가: ${item.Low}, 종가: ${item.Close}</p>
+                </div>`).join('');
+        };
+
+        const renderPredictionResults = () => {
+            predictionResults.innerHTML = ['RNN', 'LSTM', 'GRU'].map(model =>
+                `<h3>${model}: ${predictions[model] ? predictions[model].toLocaleString() + ' 원' : '예측 대기 중'}</h3>`
+            ).join('');
+        };
+
+        const updateChart = () => {
+            if (chartInstance) chartInstance.destroy();
+            if (stockData.length === 0) return;
+
+            const lastDate = stockData[stockData.length - 1].Date;
+            const nextBusinessDay = getNextBusinessDay(lastDate);
+            const labels = stockData.map(d => d.Date);
+            if (Object.keys(predictions).length > 0) {
+                labels.push(nextBusinessDay);
+            }
+
+            const closeData = stockData.map(d => parseFloat(d.Close));
+            const createPredictionDataset = (model, color) => {
+                const data = new Array(stockData.length).fill(null);
+                if (predictions[model]) {
+                    data.push(parseFloat(predictions[model]));
+                }
+                return {
+                    label: `${model} 예측`,
+                    data: data,
+                    borderColor: color,
+                    tension: 0.1,
+                    pointRadius: 5,
+                    pointBackgroundColor: color,
+                };
+            };
+
+            chartInstance = new Chart(chartCanvas, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: '실제 종가', data: closeData, borderColor: '#8884d8', tension: 0.1 },
+                        createPredictionDataset('RNN', '#ff0000'),
+                        createPredictionDataset('LSTM', '#00ff00'),
+                        createPredictionDataset('GRU', '#0000ff'),
+                    ],
+                },
+                options: { responsive: true, maintainAspectRatio: false },
+            });
+        };
+
+        // 초기 렌더링
+        updateChart();
 
     </script>
-  </body>
+</body>
 </html>
