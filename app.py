@@ -104,17 +104,17 @@ stock_scalers = {}
 
 try:
     stock_models['RNN'] = StockPredictorRNN().to(device)
-    stock_models['RNN'].load_state_dict(torch.load('Rnn-samsungStock.pth', map_location=device))
+    stock_models['RNN'].load_state_dict(torch.load('Rnn-samsungStock.pth', map_location=device, weights_only=True))
     stock_models['RNN'].eval()
     stock_scalers['RNN'] = torch.load('Rnn-scaler.pth', map_location=device)
 
     stock_models['LSTM'] = LSTMModel().to(device)
-    stock_models['LSTM'].load_state_dict(torch.load('samsungStock_LSTM_60days_basic.pth', map_location=device))
+    stock_models['LSTM'].load_state_dict(torch.load('samsungStock_LSTM_60days_basic.pth', map_location=device, weights_only=True))
     stock_models['LSTM'].eval()
     stock_scalers['LSTM'] = torch.load('scaler_LSTM_60days_basic.pth', map_location=device)
 
     stock_models['GRU'] = GRUModel().to(device)
-    stock_models['GRU'].load_state_dict(torch.load('samsungStock_GRU.pth', map_location=device))
+    stock_models['GRU'].load_state_dict(torch.load('samsungStock_GRU.pth', map_location=device, weights_only=True))
     stock_models['GRU'].eval()
     stock_scalers['GRU'] = torch.load('scaler_GRU.pth', map_location=device)
     print("✅ Stock prediction models and scalers loaded successfully.")
@@ -371,6 +371,17 @@ def predict2(model_type):
 
 # ==============================================================================
 # 6. Flask 앱 실행
+# 플러터 연결시,
+# pip install waitress
+
+# 7. conda 환경에서, 한번에 라이브러리 설치 하기.
+# conda env create -f environment.yml
+
+# 콘다 환경에서 라이브러리 설치하는 예제
+# conda install -c conda-forge [라이브러리 이름]
+# conda install -c conda-forge ultralytics
 # ==============================================================================
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    from waitress import serve
+    print("🚀 Waitress 서버 시작: http://0.0.0.0:5000")
+    serve(app, host='0.0.0.0', port=5000, threads=4)
