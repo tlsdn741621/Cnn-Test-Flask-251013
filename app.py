@@ -121,6 +121,7 @@ try:
 except FileNotFoundError as e:
     print(f"🔴 ERROR: Stock model or scaler file not found: {e.filename}")
 except Exception as e:
+    traceback.print_exc()
     print(f"🔴 ERROR loading stock models: {e}")
 
 try:
