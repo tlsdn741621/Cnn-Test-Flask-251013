@@ -104,24 +104,23 @@ stock_scalers = {}
 
 try:
     stock_models['RNN'] = StockPredictorRNN().to(device)
-    stock_models['RNN'].load_state_dict(torch.load('Rnn-samsungStock.pth', map_location=device, weights_only=True))
+    stock_models['RNN'].load_state_dict(torch.load('Rnn-samsungStock.pth', map_location=device))
     stock_models['RNN'].eval()
     stock_scalers['RNN'] = torch.load('Rnn-scaler.pth', map_location=device)
 
     stock_models['LSTM'] = LSTMModel().to(device)
-    stock_models['LSTM'].load_state_dict(torch.load('samsungStock_LSTM_60days_basic.pth', map_location=device, weights_only=True))
+    stock_models['LSTM'].load_state_dict(torch.load('samsungStock_LSTM_60days_basic.pth', map_location=device))
     stock_models['LSTM'].eval()
     stock_scalers['LSTM'] = torch.load('scaler_LSTM_60days_basic.pth', map_location=device)
 
     stock_models['GRU'] = GRUModel().to(device)
-    stock_models['GRU'].load_state_dict(torch.load('samsungStock_GRU.pth', map_location=device, weights_only=True))
+    stock_models['GRU'].load_state_dict(torch.load('samsungStock_GRU.pth', map_location=device))
     stock_models['GRU'].eval()
     stock_scalers['GRU'] = torch.load('scaler_GRU.pth', map_location=device)
     print("✅ Stock prediction models and scalers loaded successfully.")
 except FileNotFoundError as e:
     print(f"🔴 ERROR: Stock model or scaler file not found: {e.filename}")
 except Exception as e:
-    traceback.print_exc()
     print(f"🔴 ERROR loading stock models: {e}")
 
 try:
@@ -377,6 +376,12 @@ def predict2(model_type):
 
 # 7. conda 환경에서, 한번에 라이브러리 설치 하기.
 # conda env create -f environment.yml
+# pip 환경에서 모듈 설치하기.
+# pip freeze > requirements.txt
+
+# 충돌시, 가상환경 새로 생성 및 삭제,
+# conda env remove -n Pytorch
+# conda create -n Pytorch python=3.9
 
 # 콘다 환경에서 라이브러리 설치하는 예제
 # conda install -c conda-forge [라이브러리 이름]
